@@ -59,12 +59,5 @@ class CloudflareImagesFileSystemServiceProvider extends ServiceProvider
 
             return new Filesystem(new CloudflareImagesAdapter($client));
         });
-
-        config()->set('filesystems.disks.images', [
-            'driver' => 'cloudflare-images',
-            'account_id' => config('cloudflareimagesfilesystem.cf_account_id'),
-            'api_email' => config('cloudflareimagesfilesystem.api_email'),
-            'api_key' => config('cloudflareimagesfilesystem.api_key'),
-        ]);
     }
 }
