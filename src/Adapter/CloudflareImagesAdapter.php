@@ -3,15 +3,17 @@
 namespace MarothyZsolt\CloudflareImagesFileSystem\Adapter;
 
 use GuzzleHttp\Client;
-use League\Flysystem\AdapterInterface;
 use League\Flysystem\Config;
+use League\Flysystem\FileAttributes;
+use League\Flysystem\FilesystemAdapter;
+use League\Flysystem\FilesystemException;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\HttpClientInterface;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\BaseResponse;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\ImageListResponse;
 use Nette\NotImplementedException;
 use Spatie\Once\Cache;
 
-class CloudflareImagesAdapter implements AdapterInterface
+class CloudflareImagesAdapter implements FilesystemAdapter
 {
     private HttpClientInterface $httpClient;
 
@@ -20,156 +22,71 @@ class CloudflareImagesAdapter implements AdapterInterface
         $this->httpClient = $httpClient;
     }
 
-    public function write($path, $contents, Config $config)
+    public function write(string $path, string $contents, Config $config): void
     {
-        $this->httpClient->model(BaseResponse::class);
-        $metadata = $config->get('metadata');
-
-        $fileInfo = finfo_open();
-
-        $metadata['hash'] = md5($contents);
-        $metadata['original_name'] = $path;
-        $metadata['size'] = strlen($contents);
-        $metadata['mime_type'] = finfo_buffer($fileInfo, $contents, FILEINFO_MIME_TYPE);
-
-        Cache::getInstance()->flush();
-
-        return $this->httpClient->upload('images/v1', $contents, $path, [], ['metadata' => json_encode($metadata)]);
     }
 
-    public function writeStream($path, $resource, Config $config)
+    public function writeStream(string $path, $contents, Config $config): void
     {
-        throw new NotImplementedException();
     }
 
-    public function update($path, $contents, Config $config)
+    public function copy(string $source, string $destination, Config $config): void
     {
-        $this->delete($path);
-
-        return $this->write($path, $contents, $config);
     }
 
-    public function updateStream($path, $resource, Config $config)
+    public function delete(string $path): void
     {
-        throw new NotImplementedException();
     }
 
-    public function rename($path, $newpath)
+    public function setVisibility($path, $visibility): void
     {
-        $this->copy($path, $newpath);
-        $this->delete($path);
     }
 
-    public function copy($path, $newpath)
+    public function read($path): string
     {
-        $data = $this->read($path);
-
-        $config = new Config((array) $data['meta']);
-        $this->write($newpath, $data['contents'], $config);
     }
 
-    public function delete($path)
+    public function fileExists(string $path): bool
     {
-        $items = $this->findByName($path);
-        foreach ($items as $item) {
-            $this->httpClient->model(BaseResponse::class);
-            $this->httpClient->delete('images/v1/' . $item->id);
-        }
-
-        Cache::getInstance()->flush();
-
-        return true;
     }
 
-    public function deleteDir($dirname)
+    public function directoryExists(string $path): bool
     {
-        throw new NotImplementedException();
     }
 
-    public function createDir($dirname, Config $config)
+    public function deleteDirectory(string $path): void
     {
-        throw new NotImplementedException();
     }
 
-    public function setVisibility($path, $visibility)
+    public function createDirectory(string $path, Config $config): void
     {
-        throw new NotImplementedException();
     }
 
-    public function has($path)
+    public function visibility(string $path): FileAttributes
     {
-        Cache::getInstance()->flush();
-
-        $this->httpClient->model(ImageListResponse::class);
-        $item = $this->findByName($path)->first();
-
-        if ($item !== null) {
-            return $item;
-        }
-
-        return false;
     }
 
-    public function read($path)
+    public function mimeType(string $path): FileAttributes
     {
-        $image = $this->findByName($path)->first();
-        $url = $image->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public'));
-
-        $client = new Client(['verify' => false]);
-        $e = $client->get($url);
-
-        return ['contents' => $e->getBody()->getContents(), 'meta' => $image->getMetadata()];
     }
 
-    public function readStream($path)
+    public function lastModified(string $path): FileAttributes
     {
-        throw new NotImplementedException();
     }
 
-    public function listContents($directory = '', $recursive = false)
+    public function fileSize(string $path): FileAttributes
     {
-        $this->httpClient->model(ImageListResponse::class);
-
-        return $this->httpClient->get('images/v1');
     }
 
-    public function getMetadata($path)
+    public function move(string $source, string $destination, Config $config): void
     {
-        return $this->findByName($path)->first()->getMetadata();
     }
 
-    public function getSize($path)
+    public function readStream(string $path)
     {
-        return ['size' => $this->findByName($path)->first()->getSize()];
     }
 
-    public function getMimetype($path)
+    public function listContents(string $path, bool $deep): iterable
     {
-        return ['mimetype' => $this->findByName($path)->first()->getMimeType()];
-    }
-
-    public function getTimestamp($path)
-    {
-        return ['timestamp' => $this->findByName($path)->first()->uploaded->timestamp];
-    }
-
-    public function getVisibility($path)
-    {
-        throw new NotImplementedException();
-    }
-
-    public function getUrl(string $path): string
-    {
-        return $this->findByName($path)->first()->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public')) ?? '';
-    }
-
-    private function findByName(string $path): iterable
-    {
-        return once(function () use ($path) {
-            $this->httpClient->model(ImageListResponse::class);
-            $response = $this->httpClient->get('images/v1');
-
-            return collect($response->images)->where('filename', $path);
-        });
     }
 }

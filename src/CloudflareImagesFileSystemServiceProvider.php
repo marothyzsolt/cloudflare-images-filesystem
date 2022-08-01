@@ -2,11 +2,13 @@
 
 namespace MarothyZsolt\CloudflareImagesFileSystem;
 
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use League\Flysystem\Filesystem;
 use MarothyZsolt\CloudflareImagesFileSystem\Adapter\CloudflareImagesAdapter;
+use MarothyZsolt\CloudflareImagesFileSystem\Adapter\CloudflareImagesOperator;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\AuthApikey;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\AuthInterface;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\HttpClientInterface;
@@ -57,7 +59,7 @@ class CloudflareImagesFileSystemServiceProvider extends ServiceProvider
 
             $client = $this->app->make(HttpClientInterface::class, ['auth', $authProvider]);
 
-            return new Filesystem(new CloudflareImagesAdapter($client));
+            return new FilesystemAdapter(new CloudflareImagesOperator($client), new CloudflareImagesAdapter($client));
         });
     }
 }
