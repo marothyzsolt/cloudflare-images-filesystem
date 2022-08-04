@@ -3,6 +3,9 @@
 namespace MarothyZsolt\CloudflareImagesFileSystem\Adapter;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Promise\Utils;
+use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Arr;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryListing;
@@ -12,6 +15,7 @@ use League\Flysystem\FilesystemException;
 use League\Flysystem\FilesystemOperator;
 use League\Flysystem\UnableToCheckExistence;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\HttpClientInterface;
+use MarothyZsolt\CloudflareImagesFileSystem\RequestHandlers\Models\PutFile;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\BaseResponse;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\Image;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\ImageListResponse;
@@ -29,11 +33,15 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function write(string $location, string $contents, array $config = []): void
     {
-        if ($this->fileExists($location)) {
-            return;
+        $this->writeWithResponse($location, $contents, $config);
+    }
+
+    public function writeWithResponse(string $location, string $contents, array $config = []): object
+    {
+        if ($file = $this->findById($location)) {
+            return $file;
         }
 
-        $this->httpClient->model(BaseResponse::class);
         $metadata = Arr::get($config, 'metadata');
 
         $fileInfo = finfo_open();
@@ -43,9 +51,8 @@ class CloudflareImagesOperator implements FilesystemOperator
         $metadata['size'] = strlen($contents);
         $metadata['mime_type'] = finfo_buffer($fileInfo, $contents, FILEINFO_MIME_TYPE);
 
-        Cache::getInstance()->flush();
-
-        $this->httpClient->upload('images/v1', $contents, $location, [], ['metadata' => json_encode($metadata)]);
+        $this->httpClient->model(Image::class);
+        return $this->httpClient->upload('images/v1', $contents, $location, [], ['metadata' => json_encode($metadata)]);
     }
 
     public function writeStream(string $location, $contents, array $config = []): void
@@ -62,13 +69,8 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function delete(string $location): void
     {
-        $items = $this->findByName($location);
-        foreach ($items as $item) {
-            $this->httpClient->model(BaseResponse::class);
-            $this->httpClient->delete('images/v1/' . $item->id);
-        }
-
-        Cache::getInstance()->flush();
+        $this->httpClient->model(BaseResponse::class);
+        $this->httpClient->delete('images/v1/' . $location);
     }
 
     public function setVisibility(string $path, string $visibility): void
@@ -120,13 +122,22 @@ class CloudflareImagesOperator implements FilesystemOperator
         });
     }
 
+    private function findById(string $id): ?object
+    {
+        $this->httpClient->model(Image::class);
+        try {
+            return $this->httpClient->get('images/v1/' . $id);
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
 
     public function fileExists(string $location): bool
     {
         Cache::getInstance()->flush();
 
         $this->httpClient->model(ImageListResponse::class);
-        $item = $this->findByName($location)->first();
+        $item = $this->findById($location);
 
         return $item !== null;
     }
@@ -138,7 +149,47 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function deleteDirectory(string $location): void
     {
+        if ($location === '/') {
+            $this->truncateImages();
+
+            return;
+        }
+
         throw new NotImplementedException();
+    }
+
+    public function truncateImages(): void
+    {
+        $this->httpClient->model(ImageListResponse::class);
+        $imageModels = $this->httpClient->get('images/v1')->images;
+
+        $this->httpClient->async(function (PendingRequest $client) use ($imageModels): iterable {
+            foreach ($imageModels as $image) {
+                yield $client->async()->delete('images/v1/' . $image->id);
+            }
+        });
+
+        if (count($imageModels) > 0) {
+            $this->truncateImages();
+        }
+    }
+
+    public function writeMultiple(iterable $items): iterable
+    {
+        return $this->httpClient->async(function (PendingRequest $client) use ($items): iterable {
+            /** @var PutFile $putFile */
+            foreach ($items as $putFile) {
+                $client->async();
+                yield $this->httpClient->upload(
+                    'images/v1',
+                    $putFile->getContent(),
+                    $putFile->getPath(),
+                    [],
+                    ['metadata' => json_encode($putFile->getConfig())],
+                    $client
+                );
+            }
+        });
     }
 
     public function createDirectory(string $location, array $config = []): void

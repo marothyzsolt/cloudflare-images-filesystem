@@ -4,12 +4,14 @@ namespace MarothyZsolt\CloudflareImagesFileSystem\HttpClient;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Promise\Utils;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\AuthInterface;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Contracts\HttpClientInterface;
 use MarothyZsolt\CloudflareImagesFileSystem\HttpClient\Exceptions\ResponseException;
+use MarothyZsolt\CloudflareImagesFileSystem\RequestHandlers\Models\PutFile;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Contracts\ResponseDtoGeneratorInterface;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Contracts\ResponseModelInterface;
 
@@ -53,7 +55,7 @@ class HttpClient implements HttpClientInterface
         return $this->request('delete', $uri, $data, $headers);
     }
 
-    public function upload(string $uri, string $file, string $filename, array $headers = [], array $additionalData = []): ResponseModelInterface
+    public function upload(string $uri, string $file, string $filename, array $headers = [], array $additionalData = [], ?PendingRequest $client = null): object
     {
         $body = [
             'file' => [
@@ -63,22 +65,34 @@ class HttpClient implements HttpClientInterface
                 'filename' => $filename,
             ],
             'metadata' => json_encode($additionalData),
+            'id' => $filename,
         ];
 
-        $response = $this->client
-            ->asMultipart()
-            ->withHeaders($headers)
-            ->post($uri, $body);
+        if ($client === null) {
+            $this->resetClient();
+            $response = $this->client
+                ->asMultipart()
+                ->withHeaders($headers)
+                ->post($uri, $body);
+        } else {
+            $response = $client
+                ->asMultipart()
+                ->withHeaders($headers)
+                ->post($uri, $body);
+        }
 
-        $response->onError(function (Response $response) {
-            throw new \Exception($response->body());
-        });
 
-        $responseModel = app()->make($this->responseModel);
+        if ($client === null) {
+            $response->onError(function (Response $response) {
+                throw new \Exception($response->body());
+            });
 
-        $this->resetClient();
+            $responseModel = app()->make($this->responseModel);
 
-        return app(ResponseDtoGeneratorInterface::class)->generate($responseModel, $response);
+            return app(ResponseDtoGeneratorInterface::class)->generate($responseModel, $response);
+        }
+
+        return $response;
     }
 
     public function request(string $method, string $uri, array $data = [], array $headers = [], array $additionalData = []): ResponseModelInterface
@@ -109,7 +123,7 @@ class HttpClient implements HttpClientInterface
         return $this;
     }
 
-    private function resetClient(): void
+    public function resetClient(): void
     {
         unset($this->client);
 
@@ -118,5 +132,40 @@ class HttpClient implements HttpClientInterface
             ->accept('application/json')
             ->withoutVerifying()
             ->baseUrl($this->baseUri);
+    }
+
+    public function makeClient(): PendingRequest
+    {
+        return Http::withHeaders($this->auth->getHeaders())
+            ->timeout($this->timeout)
+            ->accept('application/json')
+            ->withoutVerifying()
+            ->baseUrl($this->baseUri);
+    }
+
+    public function getHttpClient(): PendingRequest
+    {
+        return $this->client;
+    }
+
+    public function getAuth()
+    {
+        return $this->auth;
+    }
+
+    public function async(\Closure $closure): iterable
+    {
+        $client = $this->makeClient();
+        $promises = $closure($client);
+
+        return Utils::unwrap($promises);
+    }
+
+    public function asyncUpload(iterable $items)
+    {
+        /** @var PutFile $item */
+        foreach ($items as $item) {
+            $this->upload('images/v1', $item->getContent(), $item->getPath(), [], ['metadata' => json_encode($item->getConfig())]);
+        }
     }
 }

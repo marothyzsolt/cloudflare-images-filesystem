@@ -5,9 +5,8 @@ namespace MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
-use Symfony\Component\HttpFoundation\StreamedResponse;
 
-class Image
+class Image extends BaseResponse
 {
     public string $id;
 
@@ -62,7 +61,11 @@ class Image
     private function initMetadata(): void
     {
         if (property_exists($this, 'meta') && property_exists($this->meta, 'metadata')) {
-            $this->metadata = json_decode($this->meta->metadata);
+            if (is_object($this->meta->metadata)) {
+                $this->metadata = json_decode($this->meta->metadata);
+            } else {
+                $this->metadata = (object) [];
+            }
         }
     }
 
@@ -79,5 +82,14 @@ class Image
     public function getMimeType(): string
     {
         return $this->metadata?->mime_type ?? 'image/jpeg';
+    }
+
+    public function getUrl(string $variant = 'public'): string
+    {
+        if (Arr::exists($this->variants, $variant)) {
+            return $this->variants[$variant];
+        }
+
+        return $this->variants[config('cloudflareimagesfilesystem.public_variant')];
     }
 }

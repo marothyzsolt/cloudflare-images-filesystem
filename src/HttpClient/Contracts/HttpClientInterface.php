@@ -18,7 +18,7 @@ interface HttpClientInterface
 
     public function delete(string $uri, array $data = [], array $headers = []): ResponseModelInterface;
 
-    public function upload(string $uri, string $file, string $filename, array $headers = [], array $additionalData = []): ResponseModelInterface;
+    public function upload(string $uri, string $file, string $filename, array $headers = [], array $additionalData = []): object;
 
     public function model(string $responseModel): HttpClientInterface;
 }
