@@ -7,6 +7,7 @@ use GuzzleHttp\Promise\Utils;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use League\Flysystem\Config;
 use League\Flysystem\DirectoryListing;
 use League\Flysystem\FileAttributes;
@@ -20,7 +21,6 @@ use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\BaseResponse
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\Image;
 use MarothyZsolt\CloudflareImagesFileSystem\ResponseHandlers\Models\ImageListResponse;
 use Nette\NotImplementedException;
-use Spatie\Once\Cache;
 
 class CloudflareImagesOperator implements FilesystemOperator
 {
@@ -80,7 +80,7 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function read(string $location): string
     {
-        $image = $this->findByName($location)->first();
+        $image = $this->findById($location);
         $url = $image->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public'));
 
         $client = new Client(['verify' => false]);
@@ -104,21 +104,13 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function getMetadata(string $path): object
     {
-        return $this->findByName($path)->first()->getMetadata();
+        return $this->findById($path)->getMetadata();
     }
 
     public function getUrl(string $path): string
     {
-        return $this->findByName($path)->first()->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public')) ?? '';
-    }
-
-    private function findByName(string $path): iterable
-    {
-        return once(function () use ($path) {
-            $this->httpClient->model(ImageListResponse::class);
-            $response = $this->httpClient->get('images/v1');
-
-            return collect($response->images)->where('filename', $path);
+        return Cache::remember('cf-images-' . md5($path), now()->addMinutes(config('cloudflareimagesfilesystem.url_cache_time', 1200)), function () use ($path) {
+            return $this->findById($path)->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public')) ?? '';
         });
     }
 
@@ -134,8 +126,6 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function fileExists(string $location): bool
     {
-        Cache::getInstance()->flush();
-
         $this->httpClient->model(ImageListResponse::class);
         $item = $this->findById($location);
 
@@ -204,17 +194,17 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function mimeType(string $path): string
     {
-        return $this->findByName($path)->first()->getMimeType();
+        return $this->findById($path)->getMimeType();
     }
 
     public function lastModified(string $path): int
     {
-        return $this->findByName($path)->first()->uploaded->timestamp;
+        return $this->findById($path)->uploaded->timestamp;
     }
 
     public function fileSize(string $path): int
     {
-        return $this->findByName($path)->first()->getSize();
+        return $this->findById($path)->getSize();
     }
 
     public function move(string $source, string $destination, array $config = []): void
