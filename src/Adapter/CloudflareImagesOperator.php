@@ -109,9 +109,11 @@ class CloudflareImagesOperator implements FilesystemOperator
 
     public function getUrl(string $path): string
     {
-        return Cache::remember('cf-images-' . md5($path), now()->addMinutes(config('cloudflareimagesfilesystem.url_cache_time', 1200)), function () use ($path) {
+        return 'https://imagedelivery.net/' . config('cloudflareimagesfilesystem.api_account') . '/' . $path . '/' . config('cloudflareimagesfilesystem.public_variant', 'public');
+
+        /*return Cache::remember('cf-images-' . md5($path), now()->addMinutes(config('cloudflareimagesfilesystem.url_cache_time', 1200)), function () use ($path) {
             return $this->findById($path)->getVariant(config('cloudflareimagesfilesystem.public_variant', 'public')) ?? '';
-        });
+        });*/
     }
 
     private function findById(string $id): ?object
